@@ -1,0 +1,1651 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full bg-slate-950 text-slate-100">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Alfie LED & Latch Test Suite (SLCAN)</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    /* Custom scrollbar styling for terminal logs and tables */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: rgba(15, 23, 42, 0.6);
+    }
+    ::-webkit-scrollbar-thumb {
+      background: rgba(51, 65, 85, 0.8);
+      border-radius: 3px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: rgba(71, 85, 105, 1);
+    }
+    .pulse-yellow {
+      animation: pulse-yellow-anim 1.5s infinite;
+    }
+    @keyframes pulse-yellow-anim {
+      0%, 100% { opacity: 1; border-color: rgba(234, 179, 8, 0.9); }
+      50% { opacity: 0.4; border-color: rgba(234, 179, 8, 0.3); }
+    }
+  </style>
+</head>
+<body class="h-full flex flex-col font-sans antialiased text-slate-200 bg-slate-950 select-none">
+  <!-- Top Navigation Header -->
+  <header class="h-16 border-b border-slate-800 bg-slate-900/80 backdrop-blur px-6 flex items-center justify-between z-20">
+    <div class="flex items-center space-x-3">
+      <div class="w-9 h-9 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400 font-bold shadow-lg shadow-amber-500/10">
+        <i class="fa-solid fa-microchip text-lg"></i>
+      </div>
+      <div>
+        <h1 class="font-bold text-lg leading-tight tracking-wide text-white flex items-center gap-2">
+          Alfie LED & Latch Test Suite
+          <span class="text-xs font-semibold px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/30">CONFIDENTIAL</span>
+        </h1>
+        <p class="text-xs text-slate-400">SLCAN CAN-Bus Controller Test & Measurement Workbench</p>
+      </div>
+    </div>
+
+    <!-- Right Controls: Serial Connection & Navigation Tabs -->
+    <div class="flex items-center space-x-3">
+      <!-- Web Serial Status Bar -->
+      <div id="connectionBadge" class="flex items-center space-x-2 px-3 py-1.5 rounded-lg text-xs font-semibold bg-red-950/60 border border-red-800/50 text-red-400">
+        <span id="connDot" class="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>
+        <span id="connText">Disconnected</span>
+      </div>
+
+      <!-- Configurable Baud Rate Selector -->
+      <div class="flex items-center space-x-1.5 bg-slate-950 border border-slate-800 rounded-lg px-2 py-1">
+        <label for="baudRateSelect" class="text-[11px] font-mono text-slate-400">Baud:</label>
+        <select id="baudRateSelect" class="bg-transparent text-xs text-amber-400 font-mono focus:outline-none cursor-pointer">
+          <option value="9600" class="bg-slate-900 text-slate-200">9600</option>
+          <option value="57600" class="bg-slate-900 text-slate-200">57600</option>
+          <option value="115200" selected class="bg-slate-900 text-slate-200">115200</option>
+          <option value="230400" class="bg-slate-900 text-slate-200">230400</option>
+          <option value="460800" class="bg-slate-900 text-slate-200">460800</option>
+          <option value="921600" class="bg-slate-900 text-slate-200">921600</option>
+        </select>
+      </div>
+
+      <button id="btnConnect" onclick="toggleSerialConnection()" class="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-sm transition-all shadow-md shadow-emerald-900/30 flex items-center space-x-2">
+        <i class="fa-solid fa-plug" id="btnConnectIcon"></i>
+        <span id="btnConnectText">Connect Serial</span>
+      </button>
+
+      <button onclick="toggleSettingsModal(true)" class="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 transition" title="Suite Settings">
+        <i class="fa-solid fa-sliders"></i>
+      </button>
+    </div>
+  </header>
+
+  <!-- Web Serial Compatibility Banner (Shown if API unsupported or insecure context) -->
+  <div id="serialCompatWarning" class="hidden bg-amber-950/80 border-b border-amber-700 px-6 py-2 text-xs text-amber-200 flex items-center justify-between">
+    <div class="flex items-center space-x-2">
+      <i class="fa-solid fa-triangle-exclamation text-amber-400 text-sm"></i>
+      <span id="serialCompatMsg">Web Serial API is not supported in this environment. Please open in Chrome, Edge, or Opera over HTTPS / Localhost.</span>
+    </div>
+    <button onclick="document.getElementById('serialCompatWarning').classList.add('hidden')" class="text-amber-400 hover:text-white"><i class="fa-solid fa-xmark"></i></button>
+  </div>
+
+  <!-- Main Work Area -->
+  <div class="flex-1 flex overflow-hidden">
+    
+    <!-- Left Navigation / Active Nodes Bar -->
+    <aside class="w-72 border-r border-slate-800 bg-slate-900/50 flex flex-col justify-between">
+      <div class="p-4 space-y-4 overflow-y-auto">
+        <!-- Tab Switches -->
+        <div class="grid grid-cols-3 gap-1 p-1 bg-slate-950 rounded-lg border border-slate-800 text-xs font-medium">
+          <button id="tabBtnTest" onclick="switchTab('test')" class="py-1.5 rounded-md text-amber-400 bg-slate-800 shadow text-center">
+            <i class="fa-solid fa-vial block mb-0.5 text-sm"></i> Test
+          </button>
+          <button id="tabBtnNoise" onclick="switchTab('noise')" class="py-1.5 rounded-md text-slate-400 hover:text-slate-200 text-center">
+            <i class="fa-solid fa-wave-square block mb-0.5 text-sm"></i> Noise
+          </button>
+          <button id="tabBtnHistory" onclick="switchTab('history')" class="py-1.5 rounded-md text-slate-400 hover:text-slate-200 text-center">
+            <i class="fa-solid fa-clock-rotate-left block mb-0.5 text-sm"></i> Logs
+          </button>
+        </div>
+
+        <!-- Target Nodes Panel -->
+        <div class="bg-slate-900 border border-slate-800 rounded-xl p-3 space-y-3">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-bold tracking-wider text-slate-400 uppercase">Target Alfie Nodes</span>
+            <button onclick="scanForNodes()" class="text-xs text-amber-400 hover:text-amber-300 flex items-center gap-1">
+              <i class="fa-solid fa-radar"></i> Auto-Scan
+            </button>
+          </div>
+          
+          <div id="nodeChipContainer" class="flex flex-wrap gap-2">
+            <!-- Node Chips Rendered Here -->
+          </div>
+
+          <div class="flex items-center gap-2 pt-2 border-t border-slate-800/80">
+            <input type="number" id="inputNewNode" min="1" max="254" value="1" placeholder="Node ID" class="w-full bg-slate-950 border border-slate-800 rounded-md px-2.5 py-1 text-xs text-slate-200 focus:outline-none focus:border-amber-500">
+            <button onclick="addNodeFromInput()" class="px-3 py-1 bg-slate-800 hover:bg-slate-700 text-xs text-slate-200 rounded-md font-medium border border-slate-700">
+              Add
+            </button>
+          </div>
+        </div>
+
+        <!-- Test Suite Summary Box -->
+        <div class="bg-slate-900/70 border border-slate-800 rounded-xl p-3 space-y-2 text-xs">
+          <div class="text-slate-400 font-semibold uppercase tracking-wider text-[10px]">Test Configuration</div>
+          <div class="flex justify-between">
+            <span class="text-slate-400">Method:</span>
+            <span id="summaryMethod" class="font-mono text-amber-400">0x62 once</span>
+          </div>
+          <div class="flex justify-between">
+            <span class="text-slate-400">Settle Time:</span>
+            <span id="summarySettle" class="font-mono text-slate-300">4000 ms</span>
+          </div>
+          <div class="flex justify-between">
+            <span class="text-slate-400">Range 1-15:</span>
+            <span id="summaryR1" class="font-mono text-slate-300">100 - 200 mA</span>
+          </div>
+          <div class="flex justify-between">
+            <span class="text-slate-400">Range 16:</span>
+            <span id="summaryR2" class="font-mono text-slate-300">5 - 5000 mA</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Live Terminal Console Log -->
+      <div class="border-t border-slate-800 bg-slate-950 p-3 flex flex-col h-64 text-xs font-mono">
+        <div class="flex items-center justify-between pb-2 border-b border-slate-900 text-slate-400">
+          <span class="font-sans font-bold text-[11px] uppercase tracking-wider text-slate-500">SLCAN Raw Frames</span>
+          <div class="flex gap-2">
+            <button onclick="togglePauseLog()" id="btnPauseLog" title="Pause Terminal" class="hover:text-slate-200"><i class="fa-solid fa-pause"></i></button>
+            <button onclick="clearTerminal()" title="Clear Terminal" class="hover:text-slate-200"><i class="fa-solid fa-trash-can"></i></button>
+          </div>
+        </div>
+        <div id="terminalLog" class="flex-1 overflow-y-auto space-y-1 py-1.5 text-[11px] leading-tight">
+          <div class="text-slate-600 italic">Serial adapter ready...</div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main Dynamic Content Workspace -->
+    <main class="flex-1 overflow-y-auto bg-slate-950 p-6">
+
+      <!-- ==================== TAB 1: STEP-BY-STEP TEST RUNNER ==================== -->
+      <section id="tabTestContent" class="space-y-6">
+        <!-- Control Header & Workflow Toolbar -->
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl flex items-center justify-between flex-wrap gap-4">
+          <div class="space-y-1">
+            <div class="flex items-center space-x-3">
+              <span id="testStepBadge" class="px-2.5 py-1 rounded-full text-xs font-bold uppercase tracking-wide bg-slate-800 text-slate-400 border border-slate-700">
+                Step 0: Ready
+              </span>
+              <span id="testProgressInfo" class="text-sm font-medium text-slate-300">
+                Click "Start Automated Test" to initiate.
+              </span>
+            </div>
+            <p class="text-xs text-slate-400">Automated sequence: Initial Door Checks → Ref Current → Sequential Open (17, 1..16) → LED Current Evaluation.</p>
+          </div>
+
+          <div class="flex items-center space-x-3">
+            <button id="btnStartTest" onclick="startAutomatedTest()" class="px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-sm transition shadow-lg shadow-amber-500/20 flex items-center space-x-2">
+              <i class="fa-solid fa-play"></i>
+              <span>Start Automated Test</span>
+            </button>
+            <button id="btnAbortTest" onclick="abortTest()" disabled class="px-4 py-2.5 rounded-xl bg-slate-800 border border-slate-700 hover:bg-red-900/50 hover:border-red-700 text-slate-400 hover:text-red-300 font-semibold text-sm transition flex items-center space-x-2 disabled:opacity-40 disabled:cursor-not-allowed">
+              <i class="fa-solid fa-stop"></i>
+              <span>Abort</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Active Alfie Nodes Grid -->
+        <div id="nodeGridContainer" class="space-y-6">
+          <!-- Alfie node cards with 17 compartment matrices rendered here -->
+        </div>
+      </section>
+
+      <!-- ==================== TAB 2: NOISE DIAGNOSTICS TOOL ==================== -->
+      <section id="tabNoiseContent" class="hidden space-y-6">
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-6">
+          <div class="flex items-center justify-between border-b border-slate-800 pb-4">
+            <div>
+              <h2 class="text-lg font-bold text-white flex items-center gap-2">
+                <i class="fa-solid fa-wave-square text-amber-400"></i>
+                Current Noise Diagnostic Workbench
+              </h2>
+              <p class="text-xs text-slate-400">Sample register stability (0x61 Instant vs 0x62 Average) to choose optimal measurement settings.</p>
+            </div>
+            
+            <div class="flex items-center space-x-3">
+              <label for="diagNodeSelect" class="text-xs font-semibold text-slate-400">Target Node:</label>
+              <select id="diagNodeSelect" class="bg-slate-950 border border-slate-800 text-xs rounded-lg px-3 py-1.5 text-slate-200 focus:outline-none focus:border-amber-500">
+                <!-- Nodes populated -->
+              </select>
+              
+              <button id="btnRunDiag" onclick="runNoiseDiagnostic()" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-medium text-xs rounded-lg shadow transition flex items-center gap-2">
+                <i class="fa-solid fa-chart-line"></i> Run Noise Sampling
+              </button>
+            </div>
+          </div>
+
+          <!-- Sampling State Banner -->
+          <div id="diagStatus" class="hidden p-3 rounded-xl bg-indigo-950/40 border border-indigo-800/50 text-indigo-300 text-xs flex items-center justify-between">
+            <span class="flex items-center gap-2">
+              <i class="fa-solid fa-spinner animate-spin"></i>
+              <span id="diagStatusText">Sampling registers on node...</span>
+            </span>
+            <span id="diagProgress" class="font-mono font-bold">0%</span>
+          </div>
+
+          <!-- Noise Statistics Tables -->
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <!-- 0x61 Instant Current Stats -->
+            <div class="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-3">
+              <div class="flex justify-between items-center border-b border-slate-900 pb-2">
+                <span class="text-xs font-bold text-slate-300">Register 0x61 (Total Instant Current)</span>
+                <span class="text-[11px] font-mono bg-slate-900 text-slate-400 px-2 py-0.5 rounded">20 samples @ 50ms</span>
+              </div>
+              <div id="stats0x61" class="text-xs space-y-2">
+                <div class="text-slate-500 italic text-center py-6">No diagnostic data collected yet.</div>
+              </div>
+            </div>
+
+            <!-- 0x62 Total Average Current Stats -->
+            <div class="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-3">
+              <div class="flex justify-between items-center border-b border-slate-900 pb-2">
+                <span class="text-xs font-bold text-slate-300">Register 0x62 (Total Average Current)</span>
+                <span class="text-[11px] font-mono bg-slate-900 text-slate-400 px-2 py-0.5 rounded">5 samples @ 500ms</span>
+              </div>
+              <div id="stats0x62" class="text-xs space-y-2">
+                <div class="text-slate-500 italic text-center py-6">No diagnostic data collected yet.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ==================== TAB 3: HISTORY & RUN LOGS ==================== -->
+      <section id="tabHistoryContent" class="hidden space-y-6">
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4">
+          <div class="flex justify-between items-center border-b border-slate-800 pb-4">
+            <div>
+              <h2 class="text-lg font-bold text-white flex items-center gap-2">
+                <i class="fa-solid fa-clock-rotate-left text-amber-400"></i>
+                Test Run History & CSV Reports
+              </h2>
+              <p class="text-xs text-slate-400">Stored history of past automated test executions.</p>
+            </div>
+
+            <div class="flex items-center space-x-2">
+              <button onclick="downloadCSVHistory()" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-xs font-medium transition flex items-center gap-2">
+                <i class="fa-solid fa-file-csv text-emerald-400"></i> Download CSV
+              </button>
+              <button onclick="clearHistory()" class="px-3 py-1.5 bg-slate-800 hover:bg-red-950 text-slate-300 hover:text-red-300 border border-slate-700 rounded-lg text-xs font-medium transition flex items-center gap-2">
+                <i class="fa-solid fa-trash-can"></i> Clear History
+              </button>
+            </div>
+          </div>
+
+          <div class="overflow-x-auto">
+            <table class="w-full text-left text-xs border-collapse">
+              <thead>
+                <tr class="border-b border-slate-800 text-slate-400 uppercase tracking-wider text-[10px]">
+                  <th class="py-3 px-4">Date / Time</th>
+                  <th class="py-3 px-4">Tested Nodes</th>
+                  <th class="py-3 px-4">Overall Result</th>
+                  <th class="py-3 px-4">Problem Details</th>
+                </tr>
+              </thead>
+              <tbody id="historyTableBody" class="divide-y divide-slate-800/60 font-mono text-slate-300">
+                <tr>
+                  <td colspan="4" class="py-6 text-center text-slate-500 italic">No past test runs recorded.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- MODAL: Settings Drawer -->
+  <div id="settingsModal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center hidden">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6 space-y-6 shadow-2xl">
+      <div class="flex justify-between items-center border-b border-slate-800 pb-3">
+        <h3 class="text-base font-bold text-white flex items-center gap-2">
+          <i class="fa-solid fa-sliders text-amber-400"></i> Test Suite Parameters (Section 6 Specs)
+        </h3>
+        <button onclick="toggleSettingsModal(false)" class="text-slate-400 hover:text-white"><i class="fa-solid fa-xmark text-lg"></i></button>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+        
+        <!-- Current Method Settings -->
+        <div class="md:col-span-2 bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-3">
+          <label class="font-bold text-amber-400 block" for="cfgMethod">Current Measurement Method (LED_CURRENT_METHOD)</label>
+          <select id="cfgMethod" onchange="updateMethodConfigUI()" class="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-amber-500">
+            <option value="0x62_once">0x62 once (Default Total Average Current)</option>
+            <option value="0x62_until_stable">0x62 until stable (Poll reg 0x62 till 2 consecutive reads match)</option>
+            <option value="0x61_mean">0x61 mean (Instant Current arithmetic mean)</option>
+            <option value="0x61_median">0x61 median (Instant Current median value)</option>
+            <option value="0x61_trimmed_mean">0x61 trimmed mean (Instant Current trimmed mean without min/max)</option>
+          </select>
+
+          <!-- Dynamic Method Parameters -->
+          <div id="methodParams0x62" class="grid grid-cols-3 gap-3 pt-2">
+            <div>
+              <span class="text-slate-400 block mb-1">Gap (ms)</span>
+              <input type="number" id="cfg0x62Gap" value="500" class="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1">
+            </div>
+            <div>
+              <span class="text-slate-400 block mb-1">Tolerance (mA)</span>
+              <input type="number" id="cfg0x62Tol" value="3" class="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1">
+            </div>
+            <div>
+              <span class="text-slate-400 block mb-1">Max Reads</span>
+              <input type="number" id="cfg0x62MaxReads" value="10" class="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1">
+            </div>
+          </div>
+
+          <div id="methodParams0x61" class="grid grid-cols-2 gap-3 pt-2">
+            <div>
+              <span class="text-slate-400 block mb-1">Samples Count</span>
+              <input type="number" id="cfg0x61Samples" value="10" class="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1">
+            </div>
+            <div>
+              <span class="text-slate-400 block mb-1">Gap Time (ms)</span>
+              <input type="number" id="cfg0x61Gap" value="50" class="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1">
+            </div>
+          </div>
+        </div>
+
+        <!-- Compartments 1-15 Range -->
+        <div class="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2">
+          <label class="font-bold text-slate-300 block">LED Range (Comp 1–15)</label>
+          <div class="flex items-center gap-2">
+            <span class="text-slate-400">Min:</span>
+            <input type="number" id="cfgRange1Min" value="100" class="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1">
+            <span class="text-slate-400">mA</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="text-slate-400">Max:</span>
+            <input type="number" id="cfgRange1Max" value="200" class="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1">
+            <span class="text-slate-400">mA</span>
+          </div>
+        </div>
+
+        <!-- Compartments 16 Range -->
+        <div class="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2">
+          <label class="font-bold text-slate-300 block">LED Range (Comp 16 - Special)</label>
+          <div class="flex items-center gap-2">
+            <span class="text-slate-400">Min:</span>
+            <input type="number" id="cfgRange16Min" value="5" class="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1">
+            <span class="text-slate-400">mA</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="text-slate-400">Max:</span>
+            <input type="number" id="cfgRange16Max" value="5000" class="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1">
+            <span class="text-slate-400">mA</span>
+          </div>
+        </div>
+
+        <!-- Settle Delay -->
+        <div class="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2">
+          <label class="font-bold text-slate-300 block">LED Settle Delay (LED_SETTLE_MS)</label>
+          <div class="flex items-center gap-2">
+            <input type="number" id="cfgSettleMs" value="4000" min="4000" class="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1">
+            <span class="text-slate-400">ms</span>
+          </div>
+          <p class="text-[10px] text-amber-500/80">Enforced min: 4000ms for average register response.</p>
+        </div>
+
+        <!-- Latch & Serial Timeouts -->
+        <div class="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2">
+          <label class="font-bold text-slate-300 block">Timeouts & Retry</label>
+          <div class="flex items-center gap-2">
+            <span class="text-slate-400 w-24">Answer Timeout:</span>
+            <input type="number" id="cfgAnswerTimeout" value="1500" class="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1">
+            <span class="text-slate-400">ms</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="text-slate-400 w-24">Busy Retry Interval:</span>
+            <input type="number" id="cfgBusyInterval" value="500" class="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1">
+            <span class="text-slate-400">ms</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="text-slate-400 w-24">Busy Max Timeout:</span>
+            <input type="number" id="cfgBusyMax" value="6000" class="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1">
+            <span class="text-slate-400">ms</span>
+          </div>
+        </div>
+
+      </div>
+
+      <div class="flex justify-end space-x-3 pt-3 border-t border-slate-800">
+        <button onclick="saveSettings()" class="px-5 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-xl transition">
+          Save Settings
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Step 0 Prompt -->
+  <div id="step0Modal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center hidden">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-lg p-6 space-y-5 shadow-2xl">
+      <div class="flex items-center space-x-3 text-amber-400">
+        <i class="fa-solid fa-triangle-exclamation text-2xl"></i>
+        <h3 class="text-lg font-bold text-white">Step 0 — Operator Pre-Test Verification</h3>
+      </div>
+      <p class="text-xs text-slate-300 leading-relaxed">
+        This automated test will sequentially pop latches <strong class="text-amber-400">17, then 1 through 16</strong> across all active Alfie controllers.
+      </p>
+      <div class="bg-amber-500/10 border border-amber-500/30 p-3 rounded-xl text-amber-300 text-xs">
+        <i class="fa-solid fa-circle-info mr-1"></i>
+        <strong>Requirement:</strong> Ensure <strong>ALL compartment doors (1-17) are manually closed</strong> before starting.
+      </div>
+      <div class="flex justify-end space-x-3 pt-2">
+        <button onclick="resolveStep0Modal(false)" class="px-4 py-2 bg-slate-800 border border-slate-700 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold">
+          Cancel Test
+        </button>
+        <button onclick="resolveStep0Modal(true)" class="px-5 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-xl shadow-md">
+          Confirm & Begin Step 1
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Step 1 Doors Open Warning / Retry Modal -->
+  <div id="doorWarningModal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center hidden">
+    <div class="bg-slate-900 border border-red-800/80 rounded-2xl w-full max-w-md p-6 space-y-4 shadow-2xl">
+      <div class="flex items-center space-x-3 text-red-400">
+        <i class="fa-solid fa-door-open text-2xl"></i>
+        <h3 class="text-lg font-bold text-white">Open Compartments Detected</h3>
+      </div>
+      <p class="text-xs text-slate-300">
+        The initial latch query (Step 1) found open compartment doors on the following node(s):
+      </p>
+      
+      <div id="doorWarningList" class="max-h-40 overflow-y-auto bg-slate-950 p-3 rounded-xl border border-slate-800 text-xs font-mono text-red-300 space-y-1">
+        <!-- List populated -->
+      </div>
+
+      <p class="text-xs text-slate-400">Please manually close all listed doors and click <strong>Retry Query</strong>.</p>
+
+      <div class="flex justify-end space-x-3 pt-2">
+        <button onclick="resolveDoorWarningModal('cancel')" class="px-4 py-2 bg-slate-800 border border-slate-700 text-slate-300 rounded-xl text-xs font-semibold">
+          Cancel Test
+        </button>
+        <button onclick="resolveDoorWarningModal('retry')" class="px-5 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-xl">
+          Retry Query
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MAIN SCRIPT -->
+  <script>
+    // =========================================================================
+    // GLOBAL STATE & CONFIGURATION
+    // =========================================================================
+    let serialPort = null;
+    let serialReader = null;
+    let isConnected = false;
+    let isConnecting = false;
+    let pauseLog = false;
+    let keepReading = false;
+
+    // Active Node List (Node IDs 1-254)
+    let activeNodes = [1]; // Default Alfie Node 01
+
+    // Configurations (Section 6)
+    let config = {
+      range1Min: 100,
+      range1Max: 200,
+      range16Min: 5,
+      range16Max: 5000,
+      settleMs: 4000, // Enforced >= 4000
+      answerTimeoutMs: 1500,
+      busyIntervalMs: 500,
+      busyMaxMs: 6000,
+      method: '0x62_once',
+      gap0x62: 500,
+      tol0x62: 3,
+      maxReads0x62: 10,
+      samples0x61: 10,
+      gap0x61: 50
+    };
+
+    // Node Runtime Testing State
+    let nodeState = {};
+
+    // Test runner flags
+    let isTestRunning = false;
+    let abortRequested = false;
+    let step0PromiseResolver = null;
+    let doorWarningResolver = null;
+
+    // Test Run History
+    let testHistory = JSON.parse(localStorage.getItem('alfie_test_history') || '[]');
+
+    // =========================================================================
+    // COMPATIBILITY & NODE MANAGEMENT HELPERS
+    // =========================================================================
+
+    function checkWebSerialCompatibility() {
+      const warningBanner = document.getElementById('serialCompatWarning');
+      const warningMsg = document.getElementById('serialCompatMsg');
+      if (!("serial" in navigator)) {
+        if (warningBanner && warningMsg) {
+          warningMsg.innerText = "Web Serial API is not supported in this browser. Please use Chrome, Edge, or Opera on Desktop.";
+          warningBanner.classList.remove('hidden');
+        }
+      } else if (window.isSecureContext === false) {
+        if (warningBanner && warningMsg) {
+          warningMsg.innerText = "Web Serial API requires a secure context (HTTPS or localhost).";
+          warningBanner.classList.remove('hidden');
+        }
+      }
+    }
+
+    function updateConnectionUIState(state) {
+      const badge = document.getElementById('connectionBadge');
+      const dot = document.getElementById('connDot');
+      const text = document.getElementById('connText');
+      const btn = document.getElementById('btnConnect');
+      const icon = document.getElementById('btnConnectIcon');
+      const btnText = document.getElementById('btnConnectText');
+
+      if (!badge || !dot || !text || !btn) return;
+
+      if (state === "Connected") {
+        badge.className = "flex items-center space-x-2 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-950/60 border border-emerald-800/50 text-emerald-400";
+        dot.className = "w-2 h-2 rounded-full bg-emerald-400 animate-pulse";
+        text.innerText = "Connected";
+        btn.className = "px-4 py-2 rounded-lg bg-red-600 hover:bg-red-500 text-white font-medium text-sm transition-all shadow-md shadow-red-900/30 flex items-center space-x-2";
+        icon.className = "fa-solid fa-unplug";
+        btnText.innerText = "Disconnect";
+      } else if (state === "Connecting") {
+        badge.className = "flex items-center space-x-2 px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-950/60 border border-amber-800/50 text-amber-400";
+        dot.className = "w-2 h-2 rounded-full bg-amber-400 animate-ping";
+        text.innerText = "Connecting...";
+        btn.disabled = true;
+      } else {
+        badge.className = "flex items-center space-x-2 px-3 py-1.5 rounded-lg text-xs font-semibold bg-red-950/60 border border-red-800/50 text-red-400";
+        dot.className = "w-2 h-2 rounded-full bg-red-500";
+        text.innerText = "Disconnected";
+        btn.className = "px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-sm transition-all shadow-md shadow-emerald-900/30 flex items-center space-x-2";
+        icon.className = "fa-solid fa-plug";
+        btnText.innerText = "Connect Serial";
+        btn.disabled = false;
+      }
+    }
+
+    function resetNodeState(nodeId) {
+      nodeState[nodeId] = {
+        latches: {},
+        leds: {},
+        referenceCurrent: 0,
+        lastCurrent: 0,
+        beforeVal: 0,
+        offset: 0,
+        ambiguousFlag: false
+      };
+      for (let i = 1; i <= 17; i++) {
+        nodeState[nodeId].latches[i] = 'closed';
+      }
+      for (let i = 1; i <= 16; i++) {
+        nodeState[nodeId].leds[i] = { mA: null, status: 'idle', error: null };
+      }
+    }
+
+    function renderNodeChips() {
+      const container = document.getElementById('nodeChipContainer');
+      const select = document.getElementById('diagNodeSelect');
+      if (!container) return;
+
+      container.innerHTML = '';
+      if (select) select.innerHTML = '';
+
+      activeNodes.forEach(nodeId => {
+        if (!nodeState[nodeId]) resetNodeState(nodeId);
+
+        const hex = nodeId.toString(16).padStart(2, '0').toUpperCase();
+        
+        const chip = document.createElement('div');
+        chip.className = "flex items-center space-x-1.5 px-2.5 py-1 rounded-lg bg-slate-800 border border-slate-700 text-xs font-mono text-amber-400";
+        chip.innerHTML = `
+          <span>Node 0x${hex} (${nodeId})</span>
+          ${activeNodes.length > 1 ? `<button onclick="removeNode(${nodeId})" class="text-slate-500 hover:text-red-400 ml-1"><i class="fa-solid fa-xmark"></i></button>` : ''}
+        `;
+        container.appendChild(chip);
+
+        if (select) {
+          const opt = document.createElement('option');
+          opt.value = nodeId;
+          opt.innerText = `Alfie Node 0x${hex} (ID ${nodeId})`;
+          select.appendChild(opt);
+        }
+      });
+    }
+
+    function addNodeFromInput() {
+      const input = document.getElementById('inputNewNode');
+      if (!input) return;
+      const val = parseInt(input.value);
+      if (isNaN(val) || val < 1 || val > 254) {
+        alert("Please enter a valid Node ID between 1 and 254.");
+        return;
+      }
+      if (activeNodes.includes(val)) {
+        alert(`Node ${val} is already added.`);
+        return;
+      }
+      activeNodes.push(val);
+      activeNodes.sort((a, b) => a - b);
+      resetNodeState(val);
+      renderNodeChips();
+      renderNodeCards();
+      logTerminal(`Added Alfie Node 0x${val.toString(16).padStart(2, '0').toUpperCase()} to test list.`, "sys");
+    }
+
+    function removeNode(nodeId) {
+      if (activeNodes.length <= 1) return;
+      activeNodes = activeNodes.filter(n => n !== nodeId);
+      delete nodeState[nodeId];
+      renderNodeChips();
+      renderNodeCards();
+      logTerminal(`Removed Alfie Node ${nodeId}.`, "sys");
+    }
+
+    function renderNodeCards() {
+      const container = document.getElementById('nodeGridContainer');
+      if (!container) return;
+
+      container.innerHTML = '';
+
+      activeNodes.forEach(nodeId => {
+        if (!nodeState[nodeId]) resetNodeState(nodeId);
+
+        const st = nodeState[nodeId];
+        const hex = nodeId.toString(16).padStart(2, '0').toUpperCase();
+
+        const card = document.createElement('div');
+        card.className = "bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-4";
+
+        let cellsHtml = '';
+        for (let p = 1; p <= 17; p++) {
+          const latchSt = st.latches[p] || 'closed';
+          const ledData = p <= 16 ? st.leds[p] : null;
+
+          let bgClass = "bg-slate-950 border-slate-800 text-slate-400";
+          let statusBadge = `<span class="text-[10px] uppercase font-mono px-1.5 py-0.5 rounded bg-slate-900 text-slate-500">CLOSED</span>`;
+
+          if (latchSt === 'testing') {
+            bgClass = "bg-amber-950/40 border-amber-500/60 text-amber-300 pulse-yellow";
+            statusBadge = `<span class="text-[10px] uppercase font-mono px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400">TESTING</span>`;
+          } else if (latchSt === 'open') {
+            if (p === 17) {
+              bgClass = "bg-emerald-950/30 border-emerald-800/60 text-emerald-300";
+              statusBadge = `<span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400">OPEN</span>`;
+            } else {
+              if (ledData && ledData.status === 'pass') {
+                bgClass = "bg-emerald-950/40 border-emerald-600 text-emerald-200";
+                statusBadge = `<span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 font-bold">PASS</span>`;
+              } else if (ledData && ledData.status === 'fail') {
+                bgClass = "bg-red-950/50 border-red-600 text-red-200";
+                statusBadge = `<span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-red-500/20 text-red-400 font-bold">FAIL</span>`;
+              } else {
+                bgClass = "bg-indigo-950/40 border-indigo-700 text-indigo-200";
+                statusBadge = `<span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300">OPEN</span>`;
+              }
+            }
+          } else if (latchSt === 'fail') {
+            bgClass = "bg-red-950/60 border-red-700 text-red-300";
+            statusBadge = `<span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-red-500/20 text-red-400 font-bold">FAIL</span>`;
+          }
+
+          cellsHtml += `
+            <div class="p-2.5 rounded-xl border ${bgClass} flex flex-col justify-between h-20 transition-all">
+              <div class="flex items-center justify-between">
+                <span class="font-bold font-mono text-xs text-white">#${p}</span>
+                ${statusBadge}
+              </div>
+              <div class="text-right">
+                ${p <= 16 ? `
+                  <div class="text-xs font-mono font-bold ${ledData && ledData.mA !== null ? (ledData.status === 'pass' ? 'text-emerald-400' : (ledData.status === 'fail' ? 'text-red-400' : 'text-slate-300')) : 'text-slate-600'}">
+                    ${ledData && ledData.mA !== null ? `${ledData.mA.toFixed(0)} mA` : '—'}
+                  </div>
+                ` : `
+                  <div class="text-[10px] font-mono text-slate-500">Latch Only</div>
+                `}
+              </div>
+            </div>
+          `;
+        }
+
+        card.innerHTML = `
+          <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+            <div class="flex items-center space-x-3">
+              <div class="w-8 h-8 rounded-lg bg-amber-500/10 border border-amber-500/30 flex items-center justify-center font-mono font-bold text-amber-400 text-xs">
+                0x${hex}
+              </div>
+              <div>
+                <h3 class="font-bold text-white text-sm">Alfie Controller (ID: ${nodeId})</h3>
+                <p class="text-[11px] text-slate-400 font-mono">Ref Current: <span class="text-amber-400">${st.referenceCurrent} mA</span></p>
+              </div>
+            </div>
+            <div id="nodePassStatus_${nodeId}">
+              <span class="text-xs font-semibold px-2.5 py-1 rounded-full bg-slate-800 text-slate-400 border border-slate-700">READY</span>
+            </div>
+          </div>
+          <div class="grid grid-cols-3 sm:grid-cols-6 lg:grid-cols-9 gap-2">
+            ${cellsHtml}
+          </div>
+        `;
+
+        container.appendChild(card);
+      });
+    }
+
+    // =========================================================================
+    // INITIALIZATION & UI SETUP
+    // =========================================================================
+    window.onload = function() {
+      checkWebSerialCompatibility();
+      renderNodeChips();
+      renderNodeCards();
+      renderHistoryTable();
+      updateMethodConfigUI();
+
+      // Listen for unexpected disconnects from physical USB unplugs
+      if ("serial" in navigator) {
+        navigator.serial.addEventListener("disconnect", (event) => {
+          if (event.target === serialPort) {
+            logTerminal("Serial device physically disconnected", "error");
+            disconnectSerial();
+          }
+        });
+      }
+    };
+
+    // =========================================================================
+    // WEB SERIAL & SLCAN FRAME PROTOCOL ENGINE
+    // =========================================================================
+
+    function getNodeHeader(nodeId) {
+      const hex = nodeId.toString(16).padStart(2, '0').toUpperCase();
+      return `t${hex}F`;
+    }
+
+    async function sendFrame(nodeId, dlcAndData) {
+      if (!serialPort || !serialPort.writable) {
+        logTerminal("Cannot send: Serial not connected", "error");
+        return;
+      }
+      const frame = `${getNodeHeader(nodeId)}${dlcAndData}\r`;
+      try {
+        const writer = serialPort.writable.getWriter();
+        const encoded = new TextEncoder().encode(frame);
+        await writer.write(encoded);
+        writer.releaseLock();
+        logTerminal(`TX -> ${frame.trim()}`, "tx");
+      } catch (e) {
+        logTerminal(`TX Error: ${e.message}`, "error");
+      }
+    }
+
+    async function toggleSerialConnection() {
+      if (isConnected || isConnecting) {
+        await disconnectSerial();
+      } else {
+        await connectSerial();
+      }
+    }
+
+    async function connectSerial() {
+      if (!("serial" in navigator)) {
+        alert("Web Serial API is not supported in this browser. Please use Chrome, Edge, or Opera.");
+        return;
+      }
+
+      isConnecting = true;
+      updateConnectionUIState("Connecting");
+
+      try {
+        // Request port with flexible filter
+        serialPort = await navigator.serial.requestPort({});
+        const selectedBaud = parseInt(document.getElementById('baudRateSelect').value) || 115200;
+
+        await serialPort.open({ baudRate: selectedBaud });
+
+        // Start reading loop directly on serialPort.readable
+        keepReading = true;
+        readSerialLoop();
+
+        isConnected = true;
+        isConnecting = false;
+        updateConnectionUIState("Connected");
+        logTerminal(`Serial port opened successfully at ${selectedBaud} baud`, "sys");
+
+      } catch (err) {
+        isConnecting = false;
+        isConnected = false;
+        updateConnectionUIState("Error");
+        
+        if (err.name === 'NotFoundError') {
+          logTerminal("Serial connection cancelled by user.", "warn");
+        } else {
+          logTerminal(`Serial Connection Error: ${err.message}`, "error");
+        }
+      }
+    }
+
+    async function disconnectSerial() {
+      keepReading = false;
+      try {
+        if (serialReader) {
+          await serialReader.cancel().catch(() => {});
+          serialReader.releaseLock();
+          serialReader = null;
+        }
+        if (serialPort) {
+          await serialPort.close().catch(() => {});
+          serialPort = null;
+        }
+      } catch (e) {
+        console.error("Disconnect cleanup error:", e);
+      } finally {
+        isConnected = false;
+        isConnecting = false;
+        updateConnectionUIState("Disconnected");
+        logTerminal("Serial port disconnected", "sys");
+      }
+    }
+
+    let serialBuffer = "";
+    let frameResolvers = [];
+
+    async function readSerialLoop() {
+      if (!serialPort || !serialPort.readable) return;
+      const decoder = new TextDecoder();
+      try {
+        serialReader = serialPort.readable.getReader();
+        while (keepReading) {
+          const { value, done } = await serialReader.read();
+          if (done) break;
+          if (value) {
+            const chunk = decoder.decode(value, { stream: true });
+            handleIncomingChunk(chunk);
+          }
+        }
+      } catch (err) {
+        if (keepReading) {
+          logTerminal(`Serial Loop Error: ${err.message}`, "error");
+        }
+      } finally {
+        if (serialReader) {
+          try { serialReader.releaseLock(); } catch (e) {}
+          serialReader = null;
+        }
+      }
+    }
+
+    function handleIncomingChunk(chunk) {
+      if (!chunk) return;
+      serialBuffer += chunk;
+      let lines = serialBuffer.split(/[\r\n]+/);
+      serialBuffer = lines.pop(); // Retain uncompleted fragment
+
+      for (let line of lines) {
+        line = line.trim();
+        if (line.length > 0) {
+          parseSLCANFrame(line);
+        }
+      }
+    }
+
+    function parseSLCANFrame(frame) {
+      if (frame === 'z') return; // SLCAN ACK ignore
+
+      logTerminal(`RX <- ${frame}`, "rx");
+
+      if (!frame.startsWith('t') || frame.length < 5) return;
+
+      const nodeHex = frame.substring(1, 3);
+      const endChar = frame.charAt(3);
+      if (endChar !== 'F') return; // Alfie CAN ID pattern tXXF
+
+      const nodeId = parseInt(nodeHex, 16);
+      const dlc = parseInt(frame.charAt(4), 16);
+      const dataHex = frame.substring(5, 5 + dlc * 2);
+
+      if (!dataHex || dataHex.length < 2) return;
+
+      const firstByte = dataHex.substring(0, 2).toUpperCase();
+
+      handleParsedReport(nodeId, firstByte, dataHex);
+
+      for (let i = frameResolvers.length - 1; i >= 0; i--) {
+        const res = frameResolvers[i];
+        if (res.nodeId === nodeId && res.matcher(firstByte, dataHex)) {
+          res.resolve({ nodeId, firstByte, dataHex });
+          frameResolvers.splice(i, 1);
+        }
+      }
+    }
+
+    function handleParsedReport(nodeId, firstByte, dataHex) {
+      if (!nodeState[nodeId]) return;
+
+      if (firstByte === '73' && dataHex.length >= 6 && dataHex.substring(2, 4) === '63') {
+        const posHex = dataHex.substring(4, 6);
+        const pos = parseInt(posHex, 16);
+        
+        logTerminal(`[Node ${nodeId}] Compartment ${pos} CLOSED by operator.`, "sys");
+
+        const ledData = nodeState[nodeId].leds[pos];
+        if (ledData && ledData.mA && ledData.mA > 0) {
+          nodeState[nodeId].offset += Math.max(0, ledData.mA);
+          logTerminal(`[Node ${nodeId}] Normalization offset updated to +${nodeState[nodeId].offset} mA`, "sys");
+        }
+
+        nodeState[nodeId].ambiguousFlag = true;
+      }
+    }
+
+    function waitForFrame(nodeId, matcherFunc, timeoutMs = 1500) {
+      return new Promise((resolve) => {
+        let timer = null;
+
+        const resolverObj = {
+          nodeId,
+          matcher: matcherFunc,
+          resolve: (data) => {
+            clearTimeout(timer);
+            resolve(data);
+          }
+        };
+
+        timer = setTimeout(() => {
+          frameResolvers = frameResolvers.filter(r => r !== resolverObj);
+          resolve(null);
+        }, timeoutMs);
+
+        frameResolvers.push(resolverObj);
+      });
+    }
+
+    // =========================================================================
+    // CURRENT MEASUREMENT METHODS & NOISE DIAGNOSTICS
+    // =========================================================================
+
+    async function readRegisterSingle(nodeId, regHex) {
+      await sendFrame(nodeId, `252${regHex}`);
+      
+      const frame = await waitForFrame(nodeId, (fb, data) => {
+        return fb === '72' && data.substring(2, 4).toUpperCase() === regHex.toUpperCase();
+      }, config.answerTimeoutMs);
+
+      if (!frame) return null;
+
+      const data = frame.dataHex;
+      if (data.length < 8) return null;
+
+      const lo = parseInt(data.substring(4, 6), 16);
+      const hi = parseInt(data.substring(6, 8), 16);
+      return lo + hi * 256;
+    }
+
+    async function getMeasuredCurrent(nodeId) {
+      let attempts = 0;
+      while (attempts < 3) {
+        attempts++;
+        nodeState[nodeId].ambiguousFlag = false;
+
+        const rawVal = await executeMethodAlgorithm(nodeId);
+
+        if (nodeState[nodeId].ambiguousFlag) {
+          logTerminal(`[Node ${nodeId}] Door closing occurred mid-reading! Discarding & re-reading...`, "warn");
+          await sleep(200);
+          continue;
+        }
+
+        if (rawVal === null) return null;
+
+        return rawVal + nodeState[nodeId].offset;
+      }
+      return null;
+    }
+
+    async function executeMethodAlgorithm(nodeId) {
+      const method = config.method;
+
+      if (method === '0x62_once') {
+        return await readRegisterSingle(nodeId, '62');
+      }
+
+      if (method === '0x62_until_stable') {
+        let prev = null;
+        for (let i = 0; i < config.maxReads0x62; i++) {
+          const cur = await readRegisterSingle(nodeId, '62');
+          if (cur === null) return null;
+          if (prev !== null && Math.abs(cur - prev) <= config.tol0x62) {
+            return cur;
+          }
+          prev = cur;
+          await sleep(config.gap0x62);
+        }
+        return prev;
+      }
+
+      if (method.startsWith('0x61')) {
+        const samples = [];
+        for (let i = 0; i < config.samples0x61; i++) {
+          const v = await readRegisterSingle(nodeId, '61');
+          if (v !== null) samples.push(v);
+          await sleep(config.gap0x61);
+        }
+
+        if (samples.length === 0) return null;
+
+        if (method === '0x61_mean') {
+          return samples.reduce((a, b) => a + b, 0) / samples.length;
+        }
+
+        if (method === '0x61_median') {
+          samples.sort((a, b) => a - b);
+          const mid = Math.floor(samples.length / 2);
+          return samples.length % 2 !== 0 ? samples[mid] : (samples[mid - 1] + samples[mid]) / 2;
+        }
+
+        if (method === '0x61_trimmed_mean') {
+          if (samples.length <= 2) return samples.reduce((a, b) => a + b, 0) / samples.length;
+          samples.sort((a, b) => a - b);
+          const trimmed = samples.slice(1, -1);
+          return trimmed.reduce((a, b) => a + b, 0) / trimmed.length;
+        }
+      }
+
+      return await readRegisterSingle(nodeId, '62');
+    }
+
+    async function runNoiseDiagnostic() {
+      const nodeId = parseInt(document.getElementById('diagNodeSelect').value);
+      if (!nodeId || !isConnected) {
+        alert("Please connect to serial adapter first.");
+        return;
+      }
+
+      const statusBox = document.getElementById('diagStatus');
+      const progressText = document.getElementById('diagProgress');
+      const statusText = document.getElementById('diagStatusText');
+
+      statusBox.classList.remove('hidden');
+      statusText.innerText = `Sampling 0x61 x 20 and 0x62 x 5 on Alfie Node ${nodeId}...`;
+
+      const samples0x61 = [];
+      for (let i = 0; i < 20; i++) {
+        progressText.innerText = `${Math.round((i / 25) * 100)}%`;
+        const val = await readRegisterSingle(nodeId, '61');
+        if (val !== null) samples0x61.push(val);
+        await sleep(50);
+      }
+
+      const samples0x62 = [];
+      for (let i = 0; i < 5; i++) {
+        progressText.innerText = `${Math.round(((20 + i) / 25) * 100)}%`;
+        const val = await readRegisterSingle(nodeId, '62');
+        if (val !== null) samples0x62.push(val);
+        await sleep(500);
+      }
+
+      progressText.innerText = `100%`;
+      statusBox.classList.add('hidden');
+
+      renderDiagnosticStats('stats0x61', samples0x61);
+      renderDiagnosticStats('stats0x62', samples0x62);
+    }
+
+    function renderDiagnosticStats(containerId, samples) {
+      const container = document.getElementById(containerId);
+      if (samples.length === 0) {
+        container.innerHTML = `<div class="text-red-400 font-bold">Failed to collect samples (Timeout).</div>`;
+        return;
+      }
+
+      const count = samples.length;
+      const min = Math.min(...samples);
+      const max = Math.max(...samples);
+      const spread = max - min;
+      const mean = samples.reduce((a, b) => a + b, 0) / count;
+
+      const sorted = [...samples].sort((a, b) => a - b);
+      const mid = Math.floor(count / 2);
+      const median = count % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+
+      let trimmedMean = mean;
+      if (count > 2) {
+        const trimmed = sorted.slice(1, -1);
+        trimmedMean = trimmed.reduce((a, b) => a + b, 0) / trimmed.length;
+      }
+
+      const variance = samples.reduce((acc, val) => acc + Math.pow(val - mean, 2), 0) / count;
+      const stdDev = Math.sqrt(variance);
+
+      container.innerHTML = `
+        <div class="grid grid-cols-2 sm:grid-cols-3 gap-2 font-mono text-[11px]">
+          <div class="bg-slate-900 p-2 rounded border border-slate-800"><span class="text-slate-500 block">Count</span><span class="text-slate-200 font-bold">${count}</span></div>
+          <div class="bg-slate-900 p-2 rounded border border-slate-800"><span class="text-slate-500 block">Min</span><span class="text-slate-200 font-bold">${min} mA</span></div>
+          <div class="bg-slate-900 p-2 rounded border border-slate-800"><span class="text-slate-500 block">Max</span><span class="text-slate-200 font-bold">${max} mA</span></div>
+          <div class="bg-slate-900 p-2 rounded border border-slate-800"><span class="text-slate-500 block">Spread</span><span class="text-amber-400 font-bold">${spread} mA</span></div>
+          <div class="bg-slate-900 p-2 rounded border border-slate-800"><span class="text-slate-500 block">Mean</span><span class="text-slate-200 font-bold">${mean.toFixed(1)} mA</span></div>
+          <div class="bg-slate-900 p-2 rounded border border-slate-800"><span class="text-slate-500 block">Median</span><span class="text-emerald-400 font-bold">${median.toFixed(1)} mA</span></div>
+          <div class="bg-slate-900 p-2 rounded border border-slate-800"><span class="text-slate-500 block">Trimmed Mean</span><span class="text-slate-200 font-bold">${trimmedMean.toFixed(1)} mA</span></div>
+          <div class="bg-slate-900 p-2 rounded border border-slate-800"><span class="text-slate-500 block">Std Dev (σ)</span><span class="text-indigo-400 font-bold">${stdDev.toFixed(2)}</span></div>
+        </div>
+        <div class="pt-2 border-t border-slate-900">
+          <span class="text-[10px] text-slate-500 block">Raw Values Array:</span>
+          <div class="text-[10px] font-mono text-slate-400 truncate">${JSON.stringify(samples)}</div>
+        </div>
+      `;
+    }
+
+    // =========================================================================
+    // FULL AUTOMATED STEP-BY-STEP TEST RUNNER
+    // =========================================================================
+
+    async function startAutomatedTest() {
+      if (!isConnected) {
+        alert("Please connect to an SLCAN serial adapter first.");
+        return;
+      }
+
+      if (activeNodes.length === 0) {
+        alert("No active Alfie nodes specified.");
+        return;
+      }
+
+      isTestRunning = true;
+      abortRequested = false;
+      document.getElementById('btnStartTest').disabled = true;
+      document.getElementById('btnAbortTest').disabled = false;
+
+      activeNodes.forEach(node => resetNodeState(node));
+      renderNodeCards();
+
+      try {
+        // STEP 0 — Operator Verification
+        updateTestStep("Step 0", "Prompting operator safety verification...");
+        const step0Confirmed = await showStep0Modal();
+        if (!step0Confirmed || abortRequested) {
+          logTerminal("Test cancelled at Step 0.", "warn");
+          finishTestRun("CANCELLED");
+          return;
+        }
+
+        // STEP 1 — Verify initial door closure
+        let step1Passed = false;
+        while (!step1Passed && !abortRequested) {
+          updateTestStep("Step 1", "Querying compartment latch statuses (1..17)...");
+          
+          const openReport = {};
+          let noAnswerNodes = [];
+
+          for (let node of activeNodes) {
+            openReport[node] = [];
+            let answered = false;
+
+            for (let pos = 1; pos <= 17; pos++) {
+              if (abortRequested) break;
+              const posHex = pos.toString(16).padStart(2, '0').toUpperCase();
+              
+              await sendFrame(node, `251${posHex}`);
+              
+              const resp = await waitForFrame(node, (fb, data) => {
+                return fb === '73' && (data.substring(2, 4) === '6F' || data.substring(2, 4) === '63') && parseInt(data.substring(4, 6), 16) === pos;
+              }, 1500);
+
+              if (resp) {
+                answered = true;
+                const code = resp.dataHex.substring(2, 4);
+                if (code === '6F') {
+                  nodeState[node].latches[pos] = 'open';
+                  if (pos <= 16) openReport[node].push(pos);
+                } else {
+                  nodeState[node].latches[pos] = 'closed';
+                }
+              }
+
+              await sleep(40);
+            }
+
+            if (!answered) {
+              noAnswerNodes.push(node);
+              logTerminal(`Alfie Node ${node}: No latch status response!`, "warn");
+            }
+          }
+
+          renderNodeCards();
+
+          let totalOpen1_16 = 0;
+          let warningListHtml = '';
+          activeNodes.forEach(n => {
+            if (openReport[n] && openReport[n].length > 0) {
+              totalOpen1_16 += openReport[n].length;
+              const hex = n.toString(16).padStart(2, '0').toUpperCase();
+              warningListHtml += `<div>Alfie ${hex}: Open compartments ${openReport[n].join(', ')}</div>`;
+            }
+          });
+
+          if (totalOpen1_16 > 0) {
+            const doorChoice = await showDoorWarningModal(warningListHtml);
+            if (doorChoice === 'retry') {
+              continue;
+            } else {
+              logTerminal("Test aborted due to open doors.", "warn");
+              finishTestRun("ABORTED");
+              return;
+            }
+          } else {
+            step1Passed = true;
+          }
+        }
+
+        if (abortRequested) { finishTestRun("ABORTED"); return; }
+
+        // STEP 2 — Reference current baseline
+        updateTestStep("Step 2", "Reading baseline reference current on all active nodes...");
+
+        for (let node of activeNodes) {
+          if (abortRequested) break;
+          const ref = await getMeasuredCurrent(node);
+          if (ref !== null) {
+            nodeState[node].referenceCurrent = Math.round(ref);
+            nodeState[node].lastCurrent = Math.round(ref);
+            logTerminal(`[Node ${node}] Reference Current = ${nodeState[node].referenceCurrent} mA`, "sys");
+          } else {
+            logTerminal(`[Node ${node}] Failed to read reference current.`, "warn");
+          }
+        }
+
+        renderNodeCards();
+        if (abortRequested) { finishTestRun("ABORTED"); return; }
+
+        // STEP 3 — Open sequence: 17 first, then 1 through 16
+        const positionsOrder = [17, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
+
+        for (let pos of positionsOrder) {
+          if (abortRequested) break;
+
+          const posHex = pos.toString(16).padStart(2, '0').toUpperCase();
+          updateTestStep("Step 3", `Testing Compartment ${pos} (Order: 17, 1..16)...`);
+
+          activeNodes.forEach(node => {
+            nodeState[node].latches[pos] = 'testing';
+            if (pos < 17) nodeState[node].leds[pos].status = 'testing';
+          });
+          renderNodeCards();
+
+          activeNodes.forEach(node => {
+            nodeState[node].beforeVal = nodeState[node].lastCurrent;
+          });
+
+          const sendTime = Date.now();
+
+          for (let node of activeNodes) {
+            if (abortRequested) break;
+
+            let latchOpenSuccess = false;
+            let busyTimerStart = Date.now();
+
+            while (!latchOpenSuccess && !abortRequested) {
+              await sendFrame(node, `24F${posHex}`);
+
+              const resp = await waitForFrame(node, (fb, data) => {
+                const subCode = data.substring(2, 4);
+                const p = parseInt(data.substring(4, 6), 16);
+                return p === pos && (
+                  (fb === '73' && subCode === '6F') ||
+                  (fb === '66' && subCode === '79') ||
+                  fb === '66'
+                );
+              }, config.answerTimeoutMs);
+
+              if (resp) {
+                const fb = resp.firstByte;
+                const subCode = resp.dataHex.substring(2, 4);
+
+                if (fb === '73' && subCode === '6F') {
+                  latchOpenSuccess = true;
+                  nodeState[node].latches[pos] = 'open';
+                  logTerminal(`[Node ${node}] Latch ${pos} OPENED OK`, "sys");
+                } else if (fb === '66' && subCode === '79') {
+                  if (Date.now() - busyTimerStart > config.busyMaxMs) {
+                    logTerminal(`[Node ${node}] Latch ${pos} Busy Timeout (>6s)!`, "error");
+                    nodeState[node].latches[pos] = 'fail';
+                    break;
+                  }
+                  logTerminal(`[Node ${node}] Latch ${pos} BUSY. Retrying in 500ms...`, "warn");
+                  await sleep(config.busyIntervalMs);
+                } else if (fb === '66') {
+                  logTerminal(`[Node ${node}] Latch ${pos} Failure report: 0x${subCode}`, "error");
+                  nodeState[node].latches[pos] = 'fail';
+                  break;
+                }
+              } else {
+                logTerminal(`[Node ${node}] Latch ${pos} did not answer open command`, "error");
+                nodeState[node].latches[pos] = 'fail';
+                break;
+              }
+            }
+          }
+
+          renderNodeCards();
+
+          if (pos === 17) {
+            logTerminal("Compartment 17 complete (Latch only, skipped LED current reading).", "sys");
+            continue;
+          }
+
+          const elapsedSinceOpen = Date.now() - sendTime;
+          const enforceSettle = Math.max(4000, config.settleMs);
+          const remainWait = enforceSettle - elapsedSinceOpen;
+          if (remainWait > 0) {
+            logTerminal(`Waiting ${remainWait} ms for LED current settling...`, "sys");
+            await sleep(remainWait);
+          }
+
+          for (let node of activeNodes) {
+            if (abortRequested) break;
+
+            const afterVal = await getMeasuredCurrent(node);
+            const beforeVal = nodeState[node].beforeVal;
+
+            if (afterVal !== null && beforeVal !== null && nodeState[node].latches[pos] === 'open') {
+              const led_mA = Math.max(0, afterVal - beforeVal);
+              nodeState[node].leds[pos].mA = led_mA;
+              nodeState[node].lastCurrent = afterVal;
+
+              let minMA = config.range1Min;
+              let maxMA = config.range1Max;
+              if (pos === 16) {
+                minMA = config.range16Min;
+                maxMA = config.range16Max;
+              }
+
+              if (led_mA >= minMA && led_mA <= maxMA) {
+                nodeState[node].leds[pos].status = 'pass';
+                logTerminal(`[Node ${node}] LED ${pos} = ${led_mA.toFixed(1)} mA [RANGE ${minMA}-${maxMA}] -> PASS`, "sys");
+              } else {
+                nodeState[node].leds[pos].status = 'fail';
+                logTerminal(`[Node ${node}] LED ${pos} = ${led_mA.toFixed(1)} mA [RANGE ${minMA}-${maxMA}] -> FAIL`, "error");
+              }
+            } else {
+              if (nodeState[node].latches[pos] !== 'open') {
+                nodeState[node].leds[pos].status = 'fail';
+                nodeState[node].leds[pos].error = 'Latch did not open';
+              } else {
+                nodeState[node].leds[pos].status = 'fail';
+                nodeState[node].leds[pos].error = 'Current reading timeout';
+              }
+            }
+          }
+
+          renderNodeCards();
+        }
+
+        if (!abortRequested) {
+          updateTestStep("Step 5", "Test completed. Generating final reports...");
+          finishTestRun("COMPLETED");
+        }
+
+      } catch (err) {
+        logTerminal(`Unexpected Test Exception: ${err.message}`, "error");
+        finishTestRun("ERROR");
+      }
+    }
+
+    function finishTestRun(statusReason) {
+      isTestRunning = false;
+      document.getElementById('btnStartTest').disabled = false;
+      document.getElementById('btnAbortTest').disabled = true;
+
+      if (statusReason === 'CANCELLED' || statusReason === 'ABORTED') {
+        updateTestStep("Aborted", `Test execution was ${statusReason.toLowerCase()}.`);
+        return;
+      }
+
+      let overallPass = true;
+      let problems = [];
+
+      activeNodes.forEach(node => {
+        const hex = node.toString(16).padStart(2, '0').toUpperCase();
+        let nodePass = true;
+        const st = nodeState[node];
+
+        for (let p = 1; p <= 17; p++) {
+          if (st.latches[p] !== 'open') {
+            nodePass = false;
+            problems.push(`Alfie ${hex}: C${p} Latch failed to open`);
+          }
+          if (p <= 16) {
+            const led = st.leds[p];
+            if (led.status !== 'pass') {
+              nodePass = false;
+              problems.push(`Alfie ${hex}: C${p} LED current out of range (${led.mA ? led.mA.toFixed(0) + 'mA' : 'No Reading'})`);
+            }
+          }
+        }
+
+        const badge = document.getElementById(`nodePassStatus_${node}`);
+        if (badge) {
+          if (nodePass) {
+            badge.className = "text-xs font-bold px-3 py-1 rounded-full bg-emerald-950 text-emerald-400 border border-emerald-700";
+            badge.innerText = "PASS";
+          } else {
+            badge.className = "text-xs font-bold px-3 py-1 rounded-full bg-red-950 text-red-400 border border-red-700";
+            badge.innerText = "FAIL";
+            overallPass = false;
+          }
+        }
+      });
+
+      const runRecord = {
+        date: new Date().toLocaleString(),
+        nodes: activeNodes.map(n => n.toString(16).padStart(2, '0').toUpperCase()).join(', '),
+        result: overallPass ? "PASS" : "FAIL",
+        problems: problems.length > 0 ? problems.join(' · ') : "None"
+      };
+
+      testHistory.unshift(runRecord);
+      localStorage.setItem('alfie_test_history', JSON.stringify(testHistory));
+      renderHistoryTable();
+
+      if (overallPass) {
+        updateTestStep("PASS", "All Alfie nodes passed all 17 latches & LED current specs!");
+      } else {
+        updateTestStep("FAIL", `Test completed with failures: ${problems.slice(0, 2).join('; ')}`);
+      }
+    }
+
+    function abortTest() {
+      abortRequested = true;
+      logTerminal("Abort command issued by operator...", "warn");
+    }
+
+    // =========================================================================
+    // MODAL DIALOG RESOLVERS
+    // =========================================================================
+    function showStep0Modal() {
+      document.getElementById('step0Modal').classList.remove('hidden');
+      return new Promise((resolve) => {
+        step0PromiseResolver = resolve;
+      });
+    }
+
+    function resolveStep0Modal(confirmed) {
+      document.getElementById('step0Modal').classList.add('hidden');
+      if (step0PromiseResolver) step0PromiseResolver(confirmed);
+    }
+
+    function showDoorWarningModal(warningListHtml) {
+      document.getElementById('doorWarningList').innerHTML = warningListHtml;
+      document.getElementById('doorWarningModal').classList.remove('hidden');
+      return new Promise((resolve) => {
+        doorWarningResolver = resolve;
+      });
+    }
+
+    function resolveDoorWarningModal(choice) {
+      document.getElementById('doorWarningModal').classList.add('hidden');
+      if (doorWarningResolver) doorWarningResolver(choice);
+    }
+
+    // =========================================================================
+    // UI & CONFIG SETTINGS HANDLERS
+    // =========================================================================
+
+    function switchTab(tab) {
+      const tabs = ['test', 'noise', 'history'];
+      tabs.forEach(t => {
+        document.getElementById(`tabBtn${capitalize(t)}`).className = t === tab ?
+          "py-1.5 rounded-md text-amber-400 bg-slate-800 shadow text-center font-bold" :
+          "py-1.5 rounded-md text-slate-400 hover:text-slate-200 text-center";
+        
+        document.getElementById(`tab${capitalize(t)}Content`).classList.toggle('hidden', t !== tab);
+      });
+    }
+
+    function capitalize(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
+
+    function toggleSettingsModal(show) {
+      document.getElementById('settingsModal').classList.toggle('hidden', !show);
+    }
+
+    function updateMethodConfigUI() {
+      const method = document.getElementById('cfgMethod').value;
+      const is0x62 = method.startsWith('0x62');
+      const is0x61 = method.startsWith('0x61');
+
+      document.getElementById('methodParams0x62').classList.toggle('hidden', !is0x62 || method === '0x62_once');
+      document.getElementById('methodParams0x61').classList.toggle('hidden', !is0x61);
+    }
+
+    function saveSettings() {
+      config.method = document.getElementById('cfgMethod').value;
+      config.gap0x62 = parseInt(document.getElementById('cfg0x62Gap').value);
+      config.tol0x62 = parseInt(document.getElementById('cfg0x62Tol').value);
+      config.maxReads0x62 = parseInt(document.getElementById('cfg0x62MaxReads').value);
+      config.samples0x61 = parseInt(document.getElementById('cfg0x61Samples').value);
+      config.gap0x61 = parseInt(document.getElementById('cfg0x61Gap').value);
+
+      config.range1Min = parseInt(document.getElementById('cfgRange1Min').value);
+      config.range1Max = parseInt(document.getElementById('cfgRange1Max').value);
+      config.range16Min = parseInt(document.getElementById('cfgRange16Min').value);
+      config.range16Max = parseInt(document.getElementById('cfgRange16Max').value);
+
+      config.settleMs = Math.max(4000, parseInt(document.getElementById('cfgSettleMs').value));
+      config.answerTimeoutMs = parseInt(document.getElementById('cfgAnswerTimeout').value);
+      config.busyIntervalMs = parseInt(document.getElementById('cfgBusyInterval').value);
+      config.busyMaxMs = parseInt(document.getElementById('cfgBusyMax').value);
+
+      document.getElementById('summaryMethod').innerText = config.method;
+      document.getElementById('summarySettle').innerText = `${config.settleMs} ms`;
+      document.getElementById('summaryR1').innerText = `${config.range1Min} - ${config.range1Max} mA`;
+      document.getElementById('summaryR2').innerText = `${config.range16Min} - ${config.range16Max} mA`;
+
+      toggleSettingsModal(false);
+      logTerminal("Suite configuration updated.", "sys");
+    }
+
+    function updateTestStep(step, info) {
+      document.getElementById('testStepBadge').innerText = step;
+      document.getElementById('testProgressInfo').innerText = info;
+    }
+
+    function logTerminal(msg, type = "rx") {
+      if (pauseLog && type !== "sys") return;
+      const term = document.getElementById('terminalLog');
+      const row = document.createElement('div');
+
+      let color = "text-slate-300";
+      if (type === "tx") color = "text-amber-400 font-semibold";
+      else if (type === "rx") color = "text-emerald-400";
+      else if (type === "warn") color = "text-yellow-400 font-bold";
+      else if (type === "error") color = "text-red-400 font-bold";
+      else if (type === "sys") color = "text-indigo-300 italic";
+
+      const timestamp = new Date().toLocaleTimeString();
+      row.className = color;
+      row.innerText = `[${timestamp}] ${msg}`;
+
+      term.appendChild(row);
+      term.scrollTop = term.scrollHeight;
+    }
+
+    function clearTerminal() {
+      document.getElementById('terminalLog').innerHTML = '';
+    }
+
+    function togglePauseLog() {
+      pauseLog = !pauseLog;
+      document.getElementById('btnPauseLog').classList.toggle('text-amber-400', pauseLog);
+    }
+
+    function renderHistoryTable() {
+      const tbody = document.getElementById('historyTableBody');
+      if (testHistory.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="4" class="py-6 text-center text-slate-500 italic">No past test runs recorded.</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = testHistory.map(row => `
+        <tr class="hover:bg-slate-900/60">
+          <td class="py-2.5 px-4 font-sans text-slate-400">${row.date}</td>
+          <td class="py-2.5 px-4 font-bold text-amber-400">${row.nodes}</td>
+          <td class="py-2.5 px-4">
+            <span class="px-2 py-0.5 rounded text-[10px] font-bold ${row.result === 'PASS' ? 'bg-emerald-950 text-emerald-400 border border-emerald-800' : 'bg-red-950 text-red-400 border border-red-800'}">
+              ${row.result}
+            </span>
+          </td>
+          <td class="py-2.5 px-4 text-xs text-slate-300">${row.problems}</td>
+        </tr>
+      `).join('');
+    }
+
+    function downloadCSVHistory() {
+      if (testHistory.length === 0) {
+        alert("No history to export.");
+        return;
+      }
+
+      let csv = "Date,Tested Nodes,Result,Problems\n";
+      testHistory.forEach(r => {
+        csv += `"${r.date}","${r.nodes}","${r.result}","${r.problems.replace(/"/g, '""')}"\n`;
+      });
+
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `Alfie_LED_Test_History_${Date.now()}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    function clearHistory() {
+      if (confirm("Clear all past test run history?")) {
+        testHistory = [];
+        localStorage.removeItem('alfie_test_history');
+        renderHistoryTable();
+      }
+    }
+
+    function scanForNodes() {
+      logTerminal("Initiating CAN bus scan for Alfie nodes (1..16)...", "sys");
+    }
+
+    function sleep(ms) {
+      return new Promise(resolve => setTimeout(resolve, ms));
+    }
+  </script>
+</body>
+</html>
